@@ -1,37 +1,73 @@
 import streamlit as st
-import plotly.express as px
-from backend import get_data
+import requests
+from datetime import datetime
 
-# Add title, text input, slider, select box, and sub header
-st.title("Weather Forecast for the Next Days")
-place = st.text_input("Place: ")
-days = st.slider("Forecast Days", min_value=1, max_value=5,
-                 help="Select the number of forecast days")
-option = st.selectbox("Select data to view",
-                      ("Temperature", "Sky"))
-st.subheader(f"{option} for the next {days} days in {place}")
+st.title("Politie API Zoeken")
 
-if place:
-    # Get the temperature/sky data
+# Input velden
+query = st.text_input("Zoekterm", value="amsterdam")
+
+# Checkboxes voor type
+st.subheader("Type selectie")
+types = ["gezocht", "vermist", "onderwerp", "blog", "overig"]
+selected_types = []
+for type_option in types:
+    if st.checkbox(type_option, value=True):
+        selected_types.append(type_option)
+
+# Overige parameters
+sort = st.selectbox("Sortering", ["relevance", "date"], index=0)
+language = st.selectbox("Taal", ["nl", "en"], index=0)
+offset = st.number_input("Offset", min_value=0, value=0)
+
+def format_date(date_str):
+    if date_str:
+        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").strftime("%d-%m-%Y %H:%M")
+    return "Geen datum"
+
+if st.button("Zoeken"):
+    params = {
+        "query": query,
+        "type": ",".join(selected_types),
+        "sort": sort,
+        "language": language,
+        "offset": offset
+    }
+    
+    url = "https://api.politie.nl/politie/search/v1"
+    
     try:
-        filtered_data = get_data(place, days)
-
-        if option == "Temperature":
-            temperatures = [dict["main"]["temp"] for dict in filtered_data]
-            dates = [dict["dt_txt"] for dict in filtered_data]
-            # Create a temperature plot
-            figure = px.line(x=dates, y=temperatures, labels={"x": "Dates", "y": "Temperature (C)"})
-            st.plotly_chart(figure)
-
-        if option == "Sky":
-            images = {"Clear": "images/clear.png", "Clouds": "images/cloud.png",
-                      "Rain": "images/rain.png", "Snow": "images/snow.png"}
-            sky_conditions = [dict["weather"][0]["main"] for dict in filtered_data]
-            dates = [dict["dt_txt"] for dict in filtered_data]
-            image_paths = [images[condition] for condition in sky_conditions]
-            st.image(image_paths, width=115, caption=dates)
-
-    except KeyError:
-        st.write("That place does not exist.")
-
-
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Toon zoekresultaten info
+            total = data['iterator']['total']
+            st.info(f"Totaal aantal resultaten: {total}")
+            
+            # Toon items in cards
+            for item in data['items']:
+                with st.container():
+                    st.markdown("---")
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.markdown(f"### [{item['titel']}]({item['url']})")
+                        st.markdown(f"*{item['type']}*")
+                        st.write(item['introductie'])
+                    
+                    with col2:
+                        st.write(f"📅 {format_date(item['publicatiedatum'])}")
+                        if item.get('displayName'):
+                            st.write(f"📌 {item['displayName']}")
+            
+            # Pagination info
+            st.markdown("---")
+            current_page = (offset // 10) + 1
+            total_pages = (total + 9) // 10
+            st.write(f"Pagina {current_page} van {total_pages}")
+            
+        else:
+            st.error(f"Error: {response.status_code}")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
